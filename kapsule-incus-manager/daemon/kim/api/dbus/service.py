@@ -50,16 +50,40 @@ class DBusService:
         logger.info("D-Bus service registered: %s", _DBUS_SERVICE)
 
         # Forward EventBus events as D-Bus signals
+        iface = bus.get_proxy(_DBUS_SERVICE, _DBUS_PATH)
         async for event in self._bus.iter_events():
-            # Signal emission is fire-and-forget; errors are non-fatal
             try:
-                proxy = bus.get_proxy(_DBUS_SERVICE, _DBUS_PATH)
-                proxy.EventReceived(
-                    event.get("type", ""),
-                    event.get("project", ""),
-                    event.get("timestamp", ""),
-                    json.dumps(event.get("metadata", {})),
-                )
+                etype    = event.get("type", "")
+                project  = event.get("project", "")
+                metadata = event.get("metadata", {})
+
+                if etype == "resource_usage":
+                    # Emit the typed ResourceUsageUpdated signal
+                    iface.ResourceUsageUpdated(
+                        metadata.get("name", ""),
+                        project,
+                        float(metadata.get("cpu_usage", 0.0)),
+                        int(metadata.get("memory_usage_bytes", 0)),
+                        int(metadata.get("disk_usage_bytes", 0)),
+                    )
+                elif etype == "lifecycle":
+                    # Emit InstanceStateChanged for lifecycle events
+                    src  = metadata.get("source", "")
+                    name = src.split("/")[-1] if "/" in src else src
+                    action = metadata.get("action", "")
+                    status_map = {
+                        "started": "Running", "stopped": "Stopped",
+                        "frozen": "Frozen",   "deleted": "Stopped",
+                    }
+                    status = status_map.get(action, "Unknown")
+                    iface.InstanceStateChanged(name, project, status)
+                    iface.EventReceived(etype, project,
+                                        event.get("timestamp", ""),
+                                        json.dumps(metadata))
+                else:
+                    iface.EventReceived(etype, project,
+                                        event.get("timestamp", ""),
+                                        json.dumps(metadata))
             except Exception as exc:
                 logger.debug("D-Bus signal emission failed: %s", exc)
 
@@ -271,6 +295,47 @@ class _KIMInterface:
         return op.get("id", "")
 
     # ── Operations ────────────────────────────────────────────────────────
+
+    # ── Remotes ───────────────────────────────────────────────────────────
+
+    def ListRemotes(self) -> str:
+        import pathlib
+        cfg = pathlib.Path.home() / ".config" / "kim" / "remotes.json"
+        stored: dict = {}
+        if cfg.exists():
+            import json as _json
+            stored = _json.loads(cfg.read_text())
+        for name in self._incus.list_remote_names():
+            if name not in stored:
+                stored[name] = {"name": name, "url": "unix://", "protocol": "incus"}
+        return json.dumps(list(stored.values()))
+
+    def AddRemote(self, config: str) -> None:
+        import pathlib
+        body = json.loads(config)
+        name = body["name"]
+        cfg_path = pathlib.Path.home() / ".config" / "kim" / "remotes.json"
+        cfg_path.parent.mkdir(parents=True, exist_ok=True)
+        stored: dict = {}
+        if cfg_path.exists():
+            stored = json.loads(cfg_path.read_text())
+        stored[name] = body
+        cfg_path.write_text(json.dumps(stored, indent=2))
+        self._incus.add_remote(name, url=body["url"],
+                               tls_cert=body.get("tls_cert"),
+                               tls_key=body.get("tls_key"))
+
+    def RemoveRemote(self, name: str) -> None:
+        import pathlib
+        cfg_path = pathlib.Path.home() / ".config" / "kim" / "remotes.json"
+        if cfg_path.exists():
+            stored = json.loads(cfg_path.read_text())
+            stored.pop(name, None)
+            cfg_path.write_text(json.dumps(stored, indent=2))
+        self._incus.remove_remote(name)
+
+    def ActivateRemote(self, name: str) -> None:
+        self._incus.set_remote(name)
 
     def ListOperations(self, status: str) -> str:
         ops = self._run(self._incus.list_operations())

@@ -1067,6 +1067,27 @@ paths:
           description: Removed
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/remotes/{name}/activate:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: activateRemote
+      summary: Switch the active remote for all subsequent API calls
+      tags: [remotes]
+      responses:
+        "200":
+          description: Active remote switched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active: { type: string }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   # ── Operations ─────────────────────────────────────────────────────────────
 
   /api/v1/operations:
