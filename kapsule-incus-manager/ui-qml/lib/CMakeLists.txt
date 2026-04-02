@@ -22,6 +22,7 @@ target_link_libraries(kim-qt
     PUBLIC
         Qt6::Core
         Qt6::DBus
+        Qt6::Network
         Qt6::WebSockets
 )
 
@@ -41,6 +42,12 @@ install(TARGETS kim-qt
 )
 install(FILES
     src/kimclient.h
+    src/containersmodel.h
+    src/networksmodel.h
+    src/storagemodel.h
+    src/imagesmodel.h
+    src/profilesmodel.h
+    src/eventsource.h
     src/types.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/kim-qt
 )

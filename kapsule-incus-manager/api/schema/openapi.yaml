@@ -507,11 +507,22 @@ paths:
       - $ref: "#/components/parameters/projectParam"
     get:
       operationId: consoleInstanceWs
-      summary: Open VGA/serial console (WebSocket upgrade, VMs only)
+      summary: Open serial or VGA console (WebSocket upgrade)
       tags: [instances]
+      parameters:
+        - name: type
+          in: query
+          schema: { type: string, enum: [console, vga], default: console }
+          description: "'console' for serial (containers + VMs), 'vga' for VMs only"
+        - name: width
+          in: query
+          schema: { type: integer, default: 80 }
+        - name: height
+          in: query
+          schema: { type: integer, default: 24 }
       responses:
         "101":
-          description: WebSocket upgrade — console stream
+          description: WebSocket upgrade — raw PTY/VGA stream
 
   /api/v1/instances/{name}/files:
     parameters:

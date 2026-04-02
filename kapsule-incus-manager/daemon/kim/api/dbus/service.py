@@ -150,6 +150,14 @@ class _KIMInterface:
     def GetInstanceLogs(self, name: str, project: str) -> str:
         return self._run(self._incus.get_instance_logs(name, project=project))
 
+    def ConsoleInstance(self, name: str, project: str, type_: str,
+                        width: int, height: int) -> str:
+        # Returns a WebSocket URL on the daemon's HTTP server
+        return (
+            f"ws://127.0.0.1:8765/api/v1/instances/{name}/console/ws"
+            f"?type={type_}&width={width}&height={height}&project={project}"
+        )
+
     def ExecInstance(self, name: str, project: str, command: str,
                      width: int, height: int) -> str:
         # Returns a WebSocket URL on the daemon's HTTP server

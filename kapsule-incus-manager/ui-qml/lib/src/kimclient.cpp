@@ -43,6 +43,15 @@ static QString toJson(const QVariantMap &m)
           QDBusPendingReply<QString> r = *w; w->deleteLater(); \
           if (r.isError()) emit error(r.error().message()); }); }
 
+// Wire a pending call that returns a plain string: emit sig(name, string)
+#define WATCH_STR(call, name, sig) \
+    { auto *w = new QDBusPendingCallWatcher((call), this); \
+      connect(w, &QDBusPendingCallWatcher::finished, this, \
+        [this,w,name](QDBusPendingCallWatcher*){ \
+          QDBusPendingReply<QString> r = *w; w->deleteLater(); \
+          if (r.isError()) { emit error(r.error().message()); return; } \
+          emit sig(name, r.value()); }); }
+
 KimClient::KimClient(QObject *parent) : QObject(parent) { connectToDaemon(); }
 KimClient::~KimClient() = default;
 bool KimClient::isConnected() const { return m_connected; }
@@ -139,8 +148,8 @@ void KimClient::deleteStoragePool(const QString &n)
 void KimClient::listImages(const QString &r)
 { WATCH_LIST(m_iface->asyncCall("ListImages", r), imagesListed) }
 
-void KimClient::pullImage(const QString &r, const QString &fp)
-{ WATCH_OP(m_iface->asyncCall("PullImage", r, fp, QString())) }
+void KimClient::pullImage(const QString &r, const QString &image, const QString &alias)
+{ WATCH_OP(m_iface->asyncCall("PullImage", r, image, alias)) }
 
 void KimClient::deleteImage(const QString &fp)
 { WATCH_OP(m_iface->asyncCall("DeleteImage", fp)) }
@@ -169,6 +178,15 @@ void KimClient::deleteProject(const QString &n)
 void KimClient::listClusterMembers()
 { WATCH_LIST(m_iface->asyncCall("ListClusterMembers", QString()), clusterMembersListed) }
 
+void KimClient::evacuateClusterMember(const QString &n)
+{ WATCH_OP(m_iface->asyncCall("EvacuateClusterMember", n)) }
+
+void KimClient::restoreClusterMember(const QString &n)
+{ WATCH_OP(m_iface->asyncCall("RestoreClusterMember", n)) }
+
+void KimClient::removeClusterMember(const QString &n)
+{ WATCH_OP(m_iface->asyncCall("RemoveClusterMember", n)) }
+
 // ── Remotes ───────────────────────────────────────────────────────────────────
 void KimClient::listRemotes()
 { WATCH_LIST(m_iface->asyncCall("ListRemotes"), remotesListed) }
@@ -179,11 +197,25 @@ void KimClient::addRemote(const QVariantMap &c)
 void KimClient::removeRemote(const QString &n)
 { WATCH_OP(m_iface->asyncCall("RemoveRemote", n)) }
 
+void KimClient::activateRemote(const QString &n)
+{ WATCH_OP(m_iface->asyncCall("ActivateRemote", n)) }
+
 // ── Operations ────────────────────────────────────────────────────────────────
 void KimClient::listOperations()
 { WATCH_LIST(m_iface->asyncCall("ListOperations", QString()), operationsListed) }
 
 void KimClient::cancelOperation(const QString &id)
 { WATCH_OP(m_iface->asyncCall("CancelOperation", id)) }
+
+// ── Console / Exec ────────────────────────────────────────────────────────────
+void KimClient::consoleInstance(const QString &name, const QString &project,
+                                 const QString &type, int width, int height)
+{ WATCH_STR(m_iface->asyncCall("ConsoleInstance", name, project, type, width, height),
+            name, consoleUrlReady) }
+
+void KimClient::execInstance(const QString &name, const QString &project,
+                              const QString &command, int width, int height)
+{ WATCH_STR(m_iface->asyncCall("ExecInstance", name, project, command, width, height),
+            name, execUrlReady) }
 
 } // namespace KIM

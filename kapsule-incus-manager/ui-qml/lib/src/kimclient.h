@@ -40,7 +40,8 @@ public:
     Q_INVOKABLE void deleteStoragePool(const QString &name);
 
     Q_INVOKABLE void listImages(const QString &remote = {});
-    Q_INVOKABLE void pullImage(const QString &remote, const QString &fingerprint);
+    Q_INVOKABLE void pullImage(const QString &remote, const QString &image,
+                               const QString &alias = {});
     Q_INVOKABLE void deleteImage(const QString &fingerprint);
 
     Q_INVOKABLE void listProfiles(const QString &project = {});
@@ -52,13 +53,26 @@ public:
     Q_INVOKABLE void deleteProject(const QString &name);
 
     Q_INVOKABLE void listClusterMembers();
+    Q_INVOKABLE void evacuateClusterMember(const QString &name);
+    Q_INVOKABLE void restoreClusterMember(const QString &name);
+    Q_INVOKABLE void removeClusterMember(const QString &name);
 
     Q_INVOKABLE void listRemotes();
     Q_INVOKABLE void addRemote(const QVariantMap &config);
     Q_INVOKABLE void removeRemote(const QString &name);
+    Q_INVOKABLE void activateRemote(const QString &name);
 
     Q_INVOKABLE void listOperations();
     Q_INVOKABLE void cancelOperation(const QString &id);
+
+    // Returns a ws:// URL string via the consoleUrlReady signal
+    Q_INVOKABLE void consoleInstance(const QString &name, const QString &project = {},
+                                     const QString &type = QStringLiteral("console"),
+                                     int width = 80, int height = 24);
+    // Returns a ws:// URL string via the execUrlReady signal
+    Q_INVOKABLE void execInstance(const QString &name, const QString &project = {},
+                                  const QString &command = QStringLiteral("/bin/bash"),
+                                  int width = 80, int height = 24);
 
 signals:
     void connectedChanged(bool connected);
@@ -74,6 +88,8 @@ signals:
     void instanceStateChanged(const QString &name, const QString &status);
     void resourceUsageUpdated(const QVariantMap &usage);
     void eventReceived(const QVariantMap &event);
+    void consoleUrlReady(const QString &name, const QString &wsUrl);
+    void execUrlReady(const QString &name, const QString &wsUrl);
     void error(const QString &message);
 
 private slots:

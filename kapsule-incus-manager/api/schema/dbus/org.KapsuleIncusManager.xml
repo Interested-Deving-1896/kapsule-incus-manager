@@ -118,6 +118,20 @@
     </method>
 
     <!--
+      ConsoleInstance: attach to the serial or VGA console of an instance.
+      type: "console" (serial, containers + VMs) | "vga" (VMs only)
+      Returns a WebSocket URL on the daemon's HTTP server.
+    -->
+    <method name="ConsoleInstance">
+      <arg name="name"    type="s" direction="in"/>
+      <arg name="project" type="s" direction="in"/>
+      <arg name="type"    type="s" direction="in"/>  <!-- console | vga -->
+      <arg name="width"   type="i" direction="in"/>
+      <arg name="height"  type="i" direction="in"/>
+      <arg name="ws_url"  type="s" direction="out"/>
+    </method>
+
+    <!--
       ExecInstance: spawns a process in the container.
       Returns a WebSocket URL on the daemon's HTTP server for PTY I/O.
       Both the QML terminal widget and web UI xterm.js connect to this URL.

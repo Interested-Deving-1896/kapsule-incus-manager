@@ -15,6 +15,7 @@ find_package(Qt6 REQUIRED COMPONENTS
     Core
     DBus
     Gui
+    Network
     Qml
     Quick
     QuickControls2

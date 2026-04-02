@@ -130,6 +130,73 @@ async def push_file(
     return JSONResponse({"status": "ok"})
 
 
+@router.websocket("/instances/{name}/console/ws")
+async def console_ws(
+    ws: WebSocket,
+    name: str,
+    project: str = "",
+    type: str = "console",
+    width: int = 80,
+    height: int = 24,
+) -> None:
+    """Proxy a console session (serial or VGA) between the client and Incus.
+
+    type="console"  — serial console, works for containers and VMs.
+    type="vga"      — VGA framebuffer, VMs only (requires SPICE/VNC client).
+
+    The client receives raw PTY bytes over the WebSocket binary frames.
+    """
+    import websockets
+
+    await ws.accept()
+    incus = ws.app.state.incus
+
+    # Start a console operation on Incus
+    resp = await incus.post(
+        f"/1.0/instances/{name}/console",
+        json={
+            "type":   type,
+            "width":  width,
+            "height": height,
+        },
+        params={"project": project} if project else {},
+    )
+    op_id  = resp.get("id", "")
+    fds    = resp.get("metadata", {}).get("fds", {})
+    secret = fds.get("0", "")
+
+    incus_ws_url = (
+        f"ws+unix:///var/lib/incus/unix.socket:"
+        f"/1.0/operations/{op_id}/websocket?secret={secret}"
+    )
+
+    try:
+        async with websockets.connect(incus_ws_url) as incus_ws:  # type: ignore[attr-defined]
+            async def _client_to_incus() -> None:
+                try:
+                    while True:
+                        data = await ws.receive_bytes()
+                        await incus_ws.send(data)
+                except (WebSocketDisconnect, Exception):
+                    pass
+
+            async def _incus_to_client() -> None:
+                try:
+                    async for msg in incus_ws:
+                        if isinstance(msg, bytes):
+                            await ws.send_bytes(msg)
+                        else:
+                            await ws.send_text(msg)
+                except Exception:
+                    pass
+
+            await asyncio.gather(_client_to_incus(), _incus_to_client())
+    except Exception:
+        pass
+    finally:
+        await ws.close()
+
+
 @router.websocket("/instances/{name}/exec/ws")
 async def exec_ws(
     ws: WebSocket,
