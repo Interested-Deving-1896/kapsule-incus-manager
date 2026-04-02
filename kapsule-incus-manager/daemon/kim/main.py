@@ -17,6 +17,7 @@ from .api.rest.app import build_app
 from .api.dbus.service import DBusService
 from .events import EventBus
 from .incus.client import IncusClient
+from .resources import poll_resource_usage
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +45,7 @@ async def _run(host: str, port: int) -> None:
 
     async with asyncio.TaskGroup() as tg:
         tg.create_task(_forward_incus_events(), name="incus-events")
+        tg.create_task(poll_resource_usage(incus, bus), name="resource-poll")
         tg.create_task(dbus_svc.run(), name="dbus-service")
         tg.create_task(server.serve(), name="http-server")
 

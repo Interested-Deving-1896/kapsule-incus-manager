@@ -18,13 +18,9 @@ qt_add_qml_module(kim-app
         qml/pages/RemotesPage.qml
         qml/pages/OperationsPage.qml
         qml/pages/EventsPage.qml
-        qml/components/ContainerCard.qml
         qml/components/StatusBadge.qml
-        qml/components/TerminalView.qml
-        qml/components/ResourceGraph.qml
         qml/components/ConfirmDialog.qml
-        qml/components/CreateContainerDialog.qml
-        qml/components/ProfilePicker.qml
+        qml/components/CreateInstanceDialog.qml
 )
 
 target_link_libraries(kim-app PRIVATE

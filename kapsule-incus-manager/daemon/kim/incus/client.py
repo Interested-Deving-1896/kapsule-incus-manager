@@ -1,21 +1,23 @@
-"""Async Incus REST API client.
+"""Async Incus REST API client with multi-remote support.
 
-Wraps the Incus Unix socket or HTTPS endpoint.
-All methods return parsed dicts/lists; callers handle serialisation.
+Maintains a pool of httpx clients keyed by remote name.
+The active remote is switched via set_remote(); all API calls
+use the currently active client.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
 
+logger = logging.getLogger(__name__)
 
-# Default local Incus socket path
-_INCUS_SOCKET = "/var/lib/incus/unix.socket"
+_LOCAL_SOCKET = "/var/lib/incus/unix.socket"
 
 
 class IncusError(Exception):
@@ -24,47 +26,137 @@ class IncusError(Exception):
         self.status_code = status_code
 
 
-class IncusClient:
-    """Async client for the Incus REST API."""
+class _RemoteConnection:
+    """A single connection to one Incus remote."""
 
-    def __init__(self, socket_path: str = _INCUS_SOCKET) -> None:
-        transport = httpx.AsyncHTTPTransport(uds=socket_path)
-        self._http = httpx.AsyncClient(
-            transport=transport,
-            base_url="http://incus",  # host is ignored for UDS
-            timeout=30,
-        )
+    def __init__(self, name: str, url: str | None = None,
+                 socket_path: str | None = None,
+                 tls_cert: str | None = None,
+                 tls_key: str | None = None) -> None:
+        self.name = name
+        if socket_path:
+            transport = httpx.AsyncHTTPTransport(uds=socket_path)
+            self._http = httpx.AsyncClient(
+                transport=transport,
+                base_url="http://incus",
+                timeout=30,
+            )
+        else:
+            assert url, "Either socket_path or url must be provided"
+            cert = (tls_cert, tls_key) if tls_cert and tls_key else None
+            self._http = httpx.AsyncClient(
+                base_url=url,
+                cert=cert,
+                verify=False,  # Incus uses self-signed certs by default
+                timeout=30,
+            )
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    async def request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = await self._http.request(method, path, **kwargs)
-        data = resp.json()
+        try:
+            data = resp.json()
+        except Exception:
+            resp.raise_for_status()
+            return {}
         if resp.status_code >= 400:
             raise IncusError(resp.status_code, data.get("error", str(resp.status_code)))
-        # Incus wraps responses: {"type": "sync", "metadata": ...}
         return data.get("metadata", data)
 
-    async def get(self, path: str, **kwargs: Any) -> Any:
-        return await self._request("GET", path, **kwargs)
+    async def stream(self, path: str) -> AsyncIterator[dict[str, Any]]:
+        async with self._http.stream("GET", path) as resp:
+            async for line in resp.aiter_lines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    continue
 
-    async def post(self, path: str, **kwargs: Any) -> Any:
-        return await self._request("POST", path, **kwargs)
+    @property
+    def http(self) -> httpx.AsyncClient:
+        return self._http
 
-    async def put(self, path: str, **kwargs: Any) -> Any:
-        return await self._request("PUT", path, **kwargs)
+    async def aclose(self) -> None:
+        await self._http.aclose()
 
-    async def delete(self, path: str, **kwargs: Any) -> Any:
-        return await self._request("DELETE", path, **kwargs)
+
+class IncusClient:
+    """Multi-remote async Incus client.
+
+    Usage:
+        client = IncusClient()                    # local socket
+        client.add_remote("prod", url="https://…", tls_cert=…, tls_key=…)
+        client.set_remote("prod")                 # switch active remote
+        instances = await client.list_instances()
+    """
+
+    def __init__(self, socket_path: str = _LOCAL_SOCKET) -> None:
+        local = _RemoteConnection("local", socket_path=socket_path)
+        self._remotes: dict[str, _RemoteConnection] = {"local": local}
+        self._active = "local"
+
+    # ── Remote management ─────────────────────────────────────────────────
+
+    def add_remote(self, name: str, url: str,
+                   tls_cert: str | None = None,
+                   tls_key: str | None = None) -> None:
+        self._remotes[name] = _RemoteConnection(
+            name, url=url, tls_cert=tls_cert, tls_key=tls_key
+        )
+
+    def remove_remote(self, name: str) -> None:
+        if name == "local":
+            raise ValueError("Cannot remove the local remote")
+        if self._active == name:
+            self._active = "local"
+        conn = self._remotes.pop(name, None)
+        if conn:
+            asyncio.ensure_future(conn.aclose())
+
+    def set_remote(self, name: str) -> None:
+        if name not in self._remotes:
+            raise KeyError(f"Remote '{name}' not configured")
+        self._active = name
+        logger.info("Active remote switched to '%s'", name)
+
+    def list_remote_names(self) -> list[str]:
+        return list(self._remotes.keys())
+
+    @property
+    def _conn(self) -> _RemoteConnection:
+        return self._remotes[self._active]
+
+    # ── Low-level helpers ─────────────────────────────────────────────────
+
+    async def get(self, path: str, **kw: Any) -> Any:
+        return await self._conn.request("GET", path, **kw)
+
+    async def post(self, path: str, **kw: Any) -> Any:
+        return await self._conn.request("POST", path, **kw)
+
+    async def put(self, path: str, **kw: Any) -> Any:
+        return await self._conn.request("PUT", path, **kw)
+
+    async def delete(self, path: str, **kw: Any) -> Any:
+        return await self._conn.request("DELETE", path, **kw)
+
+    @property
+    def _http(self) -> httpx.AsyncClient:
+        """Direct httpx client for raw access (file push/pull, exec proxy)."""
+        return self._conn.http
 
     # ── Instances ─────────────────────────────────────────────────────────
 
     async def list_instances(self, project: str = "", remote: str = "",
                               type_filter: str = "") -> list[dict[str, Any]]:
+        conn = self._remotes.get(remote, self._conn) if remote else self._conn
         params: dict[str, str] = {"recursion": "1"}
         if project:
             params["project"] = project
         if type_filter:
             params["type"] = type_filter
-        return await self.get("/1.0/instances", params=params)  # type: ignore[return-value]
+        return await conn.request("GET", "/1.0/instances", params=params)  # type: ignore[return-value]
 
     async def get_instance(self, name: str, project: str = "") -> dict[str, Any]:
         params = {"project": project} if project else {}
@@ -126,7 +218,9 @@ class IncusClient:
     async def delete_snapshot(self, name: str, snapshot: str,
                                project: str = "") -> dict[str, Any]:
         params = {"project": project} if project else {}
-        return await self.delete(f"/1.0/instances/{name}/snapshots/{snapshot}", params=params)  # type: ignore[return-value]
+        return await self.delete(  # type: ignore[return-value]
+            f"/1.0/instances/{name}/snapshots/{snapshot}", params=params
+        )
 
     # ── Networks ──────────────────────────────────────────────────────────
 
@@ -263,16 +357,9 @@ class IncusClient:
     # ── Event stream ──────────────────────────────────────────────────────
 
     async def stream_events(self) -> AsyncIterator[dict[str, Any]]:
-        """Yield parsed Incus events from the event stream indefinitely."""
-        async with self._http.stream("GET", "/1.0/events") as resp:
-            async for line in resp.aiter_lines():
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    yield json.loads(line)
-                except json.JSONDecodeError:
-                    continue
+        async for event in self._conn.stream("/1.0/events"):
+            yield event
 
     async def aclose(self) -> None:
-        await self._http.aclose()
+        for conn in self._remotes.values():
+            await conn.aclose()

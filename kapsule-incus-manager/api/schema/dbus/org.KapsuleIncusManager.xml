@@ -360,6 +360,13 @@
       <arg name="name" type="s" direction="in"/>
     </method>
 
+    <!--
+      ActivateRemote: switch the active remote for all subsequent calls.
+    -->
+    <method name="ActivateRemote">
+      <arg name="name" type="s" direction="in"/>
+    </method>
+
     <!-- ── Operations ─────────────────────────────────────────────────────── -->
 
     <method name="ListOperations">

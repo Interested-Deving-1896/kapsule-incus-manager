@@ -1,188 +1,189 @@
 #include "kimclient.h"
 #include <QDBusConnection>
-#include <QDBusReply>
+#include <QDBusPendingCallWatcher>
+#include <QDBusPendingReply>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 namespace KIM {
 
-static constexpr auto DBUS_SERVICE   = "org.KapsuleIncusManager";
-static constexpr auto DBUS_PATH      = "/org/KapsuleIncusManager";
-static constexpr auto DBUS_INTERFACE = "org.KapsuleIncusManager";
+static constexpr auto SVC  = "org.KapsuleIncusManager";
+static constexpr auto PATH = "/org/KapsuleIncusManager";
+static constexpr auto IFC  = "org.KapsuleIncusManager";
 
-KimClient::KimClient(QObject *parent)
-    : QObject(parent)
+static QVariantList parseArray(const QString &json)
 {
-    connectToDaemon();
+    const auto doc = QJsonDocument::fromJson(json.toUtf8());
+    if (!doc.isArray()) return {};
+    QVariantList out;
+    for (const auto &v : doc.array()) out.append(v.toVariant());
+    return out;
 }
 
+static QString toJson(const QVariantMap &m)
+{
+    return QJsonDocument(QJsonObject::fromVariantMap(m)).toJson(QJsonDocument::Compact);
+}
+
+// Wire a pending call: on finish emit signal(QVariantList)
+#define WATCH_LIST(call, sig) \
+    { auto *w = new QDBusPendingCallWatcher((call), this); \
+      connect(w, &QDBusPendingCallWatcher::finished, this, \
+        [this,w](QDBusPendingCallWatcher*){ \
+          QDBusPendingReply<QString> r = *w; w->deleteLater(); \
+          if (r.isError()) { emit error(r.error().message()); return; } \
+          emit sig(parseArray(r.value())); }); }
+
+// Wire a pending call: on finish just report errors
+#define WATCH_OP(call) \
+    { auto *w = new QDBusPendingCallWatcher((call), this); \
+      connect(w, &QDBusPendingCallWatcher::finished, this, \
+        [this,w](QDBusPendingCallWatcher*){ \
+          QDBusPendingReply<QString> r = *w; w->deleteLater(); \
+          if (r.isError()) emit error(r.error().message()); }); }
+
+KimClient::KimClient(QObject *parent) : QObject(parent) { connectToDaemon(); }
 KimClient::~KimClient() = default;
-
-bool KimClient::isConnected() const
-{
-    return m_connected;
-}
+bool KimClient::isConnected() const { return m_connected; }
 
 void KimClient::connectToDaemon()
 {
-    m_iface = new QDBusInterface(
-        DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
-        QDBusConnection::sessionBus(), this);
-
+    m_iface = new QDBusInterface(SVC, PATH, IFC, QDBusConnection::sessionBus(), this);
     m_connected = m_iface->isValid();
     emit connectedChanged(m_connected);
+    if (!m_connected) { emit error("Cannot connect to KIM daemon"); return; }
 
-    if (m_connected) {
-        QDBusConnection::sessionBus().connect(
-            DBUS_SERVICE, DBUS_PATH, DBUS_INTERFACE,
-            "EventReceived", this, SIGNAL(eventReceived(QVariantMap)));
-    }
+    auto bus = QDBusConnection::sessionBus();
+    bus.connect(SVC, PATH, IFC, "EventReceived",
+                this, SLOT(_onEventReceived(QString,QString,QString,QString)));
+    bus.connect(SVC, PATH, IFC, "OperationCompleted",
+                this, SLOT(_onOperationCompleted(QString,QString,QString)));
+    bus.connect(SVC, PATH, IFC, "InstanceStateChanged",
+                this, SLOT(_onInstanceStateChanged(QString,QString,QString)));
+    bus.connect(SVC, PATH, IFC, "ResourceUsageUpdated",
+                this, SLOT(_onResourceUsageUpdated(QString,QString,double,qulonglong,qulonglong)));
 }
 
-void KimClient::listInstances(const QString &project, const QString &remote)
+void KimClient::_onEventReceived(const QString &type, const QString &project,
+                                  const QString &ts, const QString &payload)
 {
-    auto reply = m_iface->asyncCall("ListInstances", project, remote);
-    // TODO: connect watcher to emit instancesListed
-    Q_UNUSED(reply)
+    QVariantMap e;
+    e["type"] = type; e["project"] = project; e["timestamp"] = ts;
+    e["metadata"] = QJsonDocument::fromJson(payload.toUtf8()).object().toVariantMap();
+    emit eventReceived(e);
 }
 
-void KimClient::createInstance(const QVariantMap &config)
+void KimClient::_onOperationCompleted(const QString &, const QString &, const QString &)
+{ listOperations(); }
+
+void KimClient::_onInstanceStateChanged(const QString &name, const QString &,
+                                         const QString &status)
+{ emit instanceStateChanged(name, status); }
+
+void KimClient::_onResourceUsageUpdated(const QString &name, const QString &project,
+                                         double cpu, qulonglong mem, qulonglong disk)
 {
-    m_iface->asyncCall("CreateInstance", config);
+    QVariantMap u;
+    u["name"]=name; u["project"]=project;
+    u["cpu_usage"]=cpu; u["memory_usage_bytes"]=mem; u["disk_usage_bytes"]=disk;
+    emit resourceUsageUpdated(u);
 }
 
-void KimClient::startInstance(const QString &name, const QString &project)
-{
-    m_iface->asyncCall("StartInstance", name, project);
-}
+// ── Instances ─────────────────────────────────────────────────────────────────
+void KimClient::listInstances(const QString &p, const QString &r)
+{ WATCH_LIST(m_iface->asyncCall("ListInstances", p, r, QString()), instancesListed) }
 
-void KimClient::stopInstance(const QString &name, bool force, const QString &project)
-{
-    m_iface->asyncCall("StopInstance", name, force, project);
-}
+void KimClient::createInstance(const QVariantMap &c)
+{ WATCH_OP(m_iface->asyncCall("CreateInstance", toJson(c))) }
 
-void KimClient::restartInstance(const QString &name, bool force, const QString &project)
-{
-    m_iface->asyncCall("RestartInstance", name, force, project);
-}
+void KimClient::startInstance(const QString &n, const QString &p)
+{ WATCH_OP(m_iface->asyncCall("ChangeInstanceState", n, p, QString("start"), false, 30)) }
 
-void KimClient::freezeInstance(const QString &name, const QString &project)
-{
-    m_iface->asyncCall("FreezeInstance", name, project);
-}
+void KimClient::stopInstance(const QString &n, bool f, const QString &p)
+{ WATCH_OP(m_iface->asyncCall("ChangeInstanceState", n, p, QString("stop"), f, 30)) }
 
-void KimClient::deleteInstance(const QString &name, bool force, const QString &project)
-{
-    m_iface->asyncCall("DeleteInstance", name, force, project);
-}
+void KimClient::restartInstance(const QString &n, bool f, const QString &p)
+{ WATCH_OP(m_iface->asyncCall("ChangeInstanceState", n, p, QString("restart"), f, 30)) }
 
-void KimClient::renameInstance(const QString &name, const QString &newName,
-                               const QString &project)
-{
-    m_iface->asyncCall("RenameInstance", name, newName, project);
-}
+void KimClient::freezeInstance(const QString &n, const QString &p)
+{ WATCH_OP(m_iface->asyncCall("ChangeInstanceState", n, p, QString("freeze"), false, 30)) }
 
-void KimClient::listNetworks(const QString &project)
-{
-    m_iface->asyncCall("ListNetworks", project);
-}
+void KimClient::deleteInstance(const QString &n, bool f, const QString &p)
+{ WATCH_OP(m_iface->asyncCall("DeleteInstance", n, p, f)) }
 
-void KimClient::createNetwork(const QVariantMap &config)
-{
-    m_iface->asyncCall("CreateNetwork", config);
-}
+void KimClient::renameInstance(const QString &n, const QString &nn, const QString &p)
+{ WATCH_OP(m_iface->asyncCall("RenameInstance", n, nn, p)) }
 
-void KimClient::deleteNetwork(const QString &name)
-{
-    m_iface->asyncCall("DeleteNetwork", name);
-}
+// ── Networks ──────────────────────────────────────────────────────────────────
+void KimClient::listNetworks(const QString &p)
+{ WATCH_LIST(m_iface->asyncCall("ListNetworks", p, QString()), networksListed) }
 
+void KimClient::createNetwork(const QVariantMap &c)
+{ WATCH_OP(m_iface->asyncCall("CreateNetwork", toJson(c))) }
+
+void KimClient::deleteNetwork(const QString &n)
+{ WATCH_OP(m_iface->asyncCall("DeleteNetwork", n, QString())) }
+
+// ── Storage ───────────────────────────────────────────────────────────────────
 void KimClient::listStoragePools()
-{
-    m_iface->asyncCall("ListStoragePools");
-}
+{ WATCH_LIST(m_iface->asyncCall("ListStoragePools", QString()), storagePoolsListed) }
 
-void KimClient::createStoragePool(const QVariantMap &config)
-{
-    m_iface->asyncCall("CreateStoragePool", config);
-}
+void KimClient::createStoragePool(const QVariantMap &c)
+{ WATCH_OP(m_iface->asyncCall("CreateStoragePool", toJson(c))) }
 
-void KimClient::deleteStoragePool(const QString &name)
-{
-    m_iface->asyncCall("DeleteStoragePool", name);
-}
+void KimClient::deleteStoragePool(const QString &n)
+{ WATCH_OP(m_iface->asyncCall("DeleteStoragePool", n)) }
 
-void KimClient::listImages(const QString &remote)
-{
-    m_iface->asyncCall("ListImages", remote);
-}
+// ── Images ────────────────────────────────────────────────────────────────────
+void KimClient::listImages(const QString &r)
+{ WATCH_LIST(m_iface->asyncCall("ListImages", r), imagesListed) }
 
-void KimClient::pullImage(const QString &remote, const QString &fingerprint)
-{
-    m_iface->asyncCall("PullImage", remote, fingerprint);
-}
+void KimClient::pullImage(const QString &r, const QString &fp)
+{ WATCH_OP(m_iface->asyncCall("PullImage", r, fp, QString())) }
 
-void KimClient::deleteImage(const QString &fingerprint)
-{
-    m_iface->asyncCall("DeleteImage", fingerprint);
-}
+void KimClient::deleteImage(const QString &fp)
+{ WATCH_OP(m_iface->asyncCall("DeleteImage", fp)) }
 
-void KimClient::listProfiles(const QString &project)
-{
-    m_iface->asyncCall("ListProfiles", project);
-}
+// ── Profiles ──────────────────────────────────────────────────────────────────
+void KimClient::listProfiles(const QString &p)
+{ WATCH_LIST(m_iface->asyncCall("ListProfiles", p, QString()), profilesListed) }
 
-void KimClient::createProfile(const QVariantMap &config)
-{
-    m_iface->asyncCall("CreateProfile", config);
-}
+void KimClient::createProfile(const QVariantMap &c)
+{ WATCH_OP(m_iface->asyncCall("CreateProfile", toJson(c))) }
 
-void KimClient::deleteProfile(const QString &name)
-{
-    m_iface->asyncCall("DeleteProfile", name);
-}
+void KimClient::deleteProfile(const QString &n)
+{ WATCH_OP(m_iface->asyncCall("DeleteProfile", n, QString())) }
 
+// ── Projects ──────────────────────────────────────────────────────────────────
 void KimClient::listProjects()
-{
-    m_iface->asyncCall("ListProjects");
-}
+{ WATCH_LIST(m_iface->asyncCall("ListProjects", QString()), projectsListed) }
 
-void KimClient::createProject(const QVariantMap &config)
-{
-    m_iface->asyncCall("CreateProject", config);
-}
+void KimClient::createProject(const QVariantMap &c)
+{ WATCH_OP(m_iface->asyncCall("CreateProject", toJson(c))) }
 
-void KimClient::deleteProject(const QString &name)
-{
-    m_iface->asyncCall("DeleteProject", name);
-}
+void KimClient::deleteProject(const QString &n)
+{ WATCH_OP(m_iface->asyncCall("DeleteProject", n)) }
 
+// ── Cluster ───────────────────────────────────────────────────────────────────
 void KimClient::listClusterMembers()
-{
-    m_iface->asyncCall("ListClusterMembers");
-}
+{ WATCH_LIST(m_iface->asyncCall("ListClusterMembers", QString()), clusterMembersListed) }
 
+// ── Remotes ───────────────────────────────────────────────────────────────────
 void KimClient::listRemotes()
-{
-    m_iface->asyncCall("ListRemotes");
-}
+{ WATCH_LIST(m_iface->asyncCall("ListRemotes"), remotesListed) }
 
-void KimClient::addRemote(const QVariantMap &config)
-{
-    m_iface->asyncCall("AddRemote", config);
-}
+void KimClient::addRemote(const QVariantMap &c)
+{ WATCH_OP(m_iface->asyncCall("AddRemote", toJson(c))) }
 
-void KimClient::removeRemote(const QString &name)
-{
-    m_iface->asyncCall("RemoveRemote", name);
-}
+void KimClient::removeRemote(const QString &n)
+{ WATCH_OP(m_iface->asyncCall("RemoveRemote", n)) }
 
+// ── Operations ────────────────────────────────────────────────────────────────
 void KimClient::listOperations()
-{
-    m_iface->asyncCall("ListOperations");
-}
+{ WATCH_LIST(m_iface->asyncCall("ListOperations", QString()), operationsListed) }
 
 void KimClient::cancelOperation(const QString &id)
-{
-    m_iface->asyncCall("CancelOperation", id);
-}
+{ WATCH_OP(m_iface->asyncCall("CancelOperation", id)) }
 
 } // namespace KIM

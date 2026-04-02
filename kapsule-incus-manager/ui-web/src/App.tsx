@@ -1,63 +1,57 @@
 import { Routes, Route, NavLink } from "react-router-dom";
+import { ContainersPage }  from "./pages/ContainersPage";
+import { VMsPage }         from "./pages/VMsPage";
+import { NetworksPage }    from "./pages/NetworksPage";
+import { StoragePage }     from "./pages/StoragePage";
+import { ImagesPage }      from "./pages/ImagesPage";
+import { ProfilesPage }    from "./pages/ProfilesPage";
+import { ProjectsPage }    from "./pages/ProjectsPage";
+import { ClusterPage }     from "./pages/ClusterPage";
+import { RemotesPage }     from "./pages/RemotesPage";
+import { OperationsPage }  from "./pages/OperationsPage";
+import { EventsPage }      from "./pages/EventsPage";
 
-const PAGES = [
-  { path: "/",           label: "Containers" },
-  { path: "/vms",        label: "VMs" },
-  { path: "/networks",   label: "Networks" },
-  { path: "/storage",    label: "Storage" },
-  { path: "/images",     label: "Images" },
-  { path: "/profiles",   label: "Profiles" },
-  { path: "/projects",   label: "Projects" },
-  { path: "/cluster",    label: "Cluster" },
-  { path: "/remotes",    label: "Remotes" },
-  { path: "/operations", label: "Operations" },
-  { path: "/events",     label: "Events" },
+const NAV = [
+  { path: "/",           label: "Containers",  element: <ContainersPage /> },
+  { path: "/vms",        label: "VMs",         element: <VMsPage /> },
+  { path: "/networks",   label: "Networks",    element: <NetworksPage /> },
+  { path: "/storage",    label: "Storage",     element: <StoragePage /> },
+  { path: "/images",     label: "Images",      element: <ImagesPage /> },
+  { path: "/profiles",   label: "Profiles",    element: <ProfilesPage /> },
+  { path: "/projects",   label: "Projects",    element: <ProjectsPage /> },
+  { path: "/cluster",    label: "Cluster",     element: <ClusterPage /> },
+  { path: "/remotes",    label: "Remotes",     element: <RemotesPage /> },
+  { path: "/operations", label: "Operations",  element: <OperationsPage /> },
+  { path: "/events",     label: "Events",      element: <EventsPage /> },
 ];
-
-// Placeholder page — replace with real implementations
-const Placeholder = ({ title }: { title: string }) => (
-  <div style={{ padding: 32, opacity: 0.5 }}>{title} — not yet implemented</div>
-);
 
 export default function App() {
   return (
-    <div style={{ display: "flex", height: "100vh" }}>
-      <nav style={{ width: 200, borderRight: "1px solid #ddd", padding: 8 }}>
-        <strong style={{ display: "block", marginBottom: 12 }}>
+    <div style={{ display:"flex", height:"100vh", fontFamily:"system-ui,sans-serif" }}>
+      <nav style={{ width:200, borderRight:"1px solid #e5e7eb", padding:"12px 8px",
+                    display:"flex", flexDirection:"column", gap:2, background:"#fafafa" }}>
+        <div style={{ fontWeight:700, fontSize:14, padding:"8px 8px 16px",
+                      color:"#111", borderBottom:"1px solid #e5e7eb", marginBottom:8 }}>
           Kapsule Incus Manager
-        </strong>
-        {PAGES.map(({ path, label }) => (
-          <NavLink
-            key={path}
-            to={path}
-            end={path === "/"}
+        </div>
+        {NAV.map(({ path, label }) => (
+          <NavLink key={path} to={path} end={path === "/"}
             style={({ isActive }) => ({
-              display: "block",
-              padding: "6px 8px",
-              borderRadius: 4,
-              textDecoration: "none",
+              display:"block", padding:"7px 10px", borderRadius:6,
+              textDecoration:"none", fontSize:14,
               background: isActive ? "#e8f0fe" : "transparent",
-              color: isActive ? "#1a73e8" : "inherit",
-            })}
-          >
+              color: isActive ? "#1a73e8" : "#374151",
+              fontWeight: isActive ? 600 : 400,
+            })}>
             {label}
           </NavLink>
         ))}
       </nav>
-
-      <main style={{ flex: 1, overflow: "auto" }}>
+      <main style={{ flex:1, overflow:"auto" }}>
         <Routes>
-          <Route path="/"           element={<Placeholder title="Containers" />} />
-          <Route path="/vms"        element={<Placeholder title="VMs" />} />
-          <Route path="/networks"   element={<Placeholder title="Networks" />} />
-          <Route path="/storage"    element={<Placeholder title="Storage" />} />
-          <Route path="/images"     element={<Placeholder title="Images" />} />
-          <Route path="/profiles"   element={<Placeholder title="Profiles" />} />
-          <Route path="/projects"   element={<Placeholder title="Projects" />} />
-          <Route path="/cluster"    element={<Placeholder title="Cluster" />} />
-          <Route path="/remotes"    element={<Placeholder title="Remotes" />} />
-          <Route path="/operations" element={<Placeholder title="Operations" />} />
-          <Route path="/events"     element={<Placeholder title="Events" />} />
+          {NAV.map(({ path, element }) => (
+            <Route key={path} path={path} element={element} />
+          ))}
         </Routes>
       </main>
     </div>
