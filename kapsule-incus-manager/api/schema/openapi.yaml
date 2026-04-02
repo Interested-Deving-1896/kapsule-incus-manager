@@ -1,0 +1,1190 @@
+openapi: "3.1.0"
+info:
+  title: Kapsule-Incus-Manager API
+  version: "0.1.0"
+  description: >
+    Canonical API definition for the KIM daemon.
+    All three frontends (QML, web, CLI) are thin clients against this API.
+    The D-Bus interface mirrors every operation defined here.
+  license:
+    name: GPL-3.0-or-later
+
+servers:
+  - url: http://127.0.0.1:8765
+    description: Local KIM daemon
+
+tags:
+  - name: instances
+    description: Containers and virtual machines
+  - name: networks
+    description: Network management
+  - name: storage
+    description: Storage pools and volumes
+  - name: images
+    description: Image management
+  - name: profiles
+    description: Profile management
+  - name: projects
+    description: Project management
+  - name: cluster
+    description: Cluster member management
+  - name: remotes
+    description: Remote server management
+  - name: operations
+    description: Async operation tracking
+  - name: events
+    description: Real-time event stream
+  - name: provisioning
+    description: App container and Compose deployment
+
+# ── Reusable components ───────────────────────────────────────────────────────
+components:
+  schemas:
+
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:    { type: integer }
+        message: { type: string }
+
+    Operation:
+      type: object
+      required: [id, description, status, created_at]
+      properties:
+        id:          { type: string, format: uuid }
+        description: { type: string }
+        status:
+          type: string
+          enum: [pending, running, succeeded, failed, cancelled]
+        created_at:  { type: string, format: date-time }
+        updated_at:  { type: string, format: date-time }
+        metadata:    { type: object, additionalProperties: true }
+        error:       { type: string }
+
+    InstanceStatus:
+      type: string
+      enum: [Running, Stopped, Frozen, Error, Unknown]
+
+    InstanceType:
+      type: string
+      enum: [container, virtual-machine]
+
+    InstanceSummary:
+      type: object
+      required: [name, type, status, project, remote]
+      properties:
+        name:       { type: string }
+        type:       { $ref: "#/components/schemas/InstanceType" }
+        status:     { $ref: "#/components/schemas/InstanceStatus" }
+        image:      { type: string }
+        project:    { type: string }
+        remote:     { type: string }
+        created_at: { type: string, format: date-time }
+        cpu_usage:  { type: number, description: "CPU usage 0.0–1.0" }
+        memory_usage_bytes: { type: integer }
+        disk_usage_bytes:   { type: integer }
+
+    InstanceConfig:
+      type: object
+      required: [name, image, type]
+      properties:
+        name:        { type: string }
+        type:        { $ref: "#/components/schemas/InstanceType" }
+        image:       { type: string, example: "images:ubuntu/24.04" }
+        profiles:
+          type: array
+          items: { type: string }
+          default: [default]
+        config:      { type: object, additionalProperties: { type: string } }
+        devices:     { type: object, additionalProperties: true }
+        description: { type: string }
+        project:     { type: string, default: "" }
+        remote:      { type: string, default: "" }
+
+    InstanceState:
+      type: object
+      required: [action]
+      properties:
+        action:
+          type: string
+          enum: [start, stop, restart, freeze, unfreeze]
+        force:   { type: boolean, default: false }
+        timeout: { type: integer, default: 30 }
+        project: { type: string, default: "" }
+
+    InstanceRename:
+      type: object
+      required: [new_name]
+      properties:
+        new_name: { type: string }
+        project:  { type: string, default: "" }
+
+    Network:
+      type: object
+      required: [name, type]
+      properties:
+        name:        { type: string }
+        type:
+          type: string
+          enum: [bridge, macvlan, sriov, ovn, physical]
+        description: { type: string }
+        managed:     { type: boolean }
+        config:      { type: object, additionalProperties: { type: string } }
+        project:     { type: string, default: "" }
+
+    StoragePool:
+      type: object
+      required: [name, driver]
+      properties:
+        name:        { type: string }
+        driver:
+          type: string
+          enum: [dir, btrfs, lvm, zfs, ceph, cephfs]
+        description: { type: string }
+        config:      { type: object, additionalProperties: { type: string } }
+        status:      { type: string }
+
+    StorageVolume:
+      type: object
+      required: [name, type]
+      properties:
+        name:        { type: string }
+        type:
+          type: string
+          enum: [container, virtual-machine, image, custom]
+        description: { type: string }
+        config:      { type: object, additionalProperties: { type: string } }
+        pool:        { type: string }
+
+    Image:
+      type: object
+      required: [fingerprint, description]
+      properties:
+        fingerprint:  { type: string }
+        description:  { type: string }
+        os:           { type: string }
+        release:      { type: string }
+        architecture: { type: string }
+        size_bytes:   { type: integer }
+        uploaded_at:  { type: string, format: date-time }
+        aliases:
+          type: array
+          items: { type: string }
+        remote:       { type: string, default: "" }
+
+    ImagePull:
+      type: object
+      required: [remote, image]
+      properties:
+        remote: { type: string, example: "images" }
+        image:  { type: string, example: "ubuntu/24.04" }
+        alias:  { type: string }
+
+    Profile:
+      type: object
+      required: [name]
+      properties:
+        name:        { type: string }
+        description: { type: string }
+        config:      { type: object, additionalProperties: { type: string } }
+        devices:     { type: object, additionalProperties: true }
+        project:     { type: string, default: "" }
+
+    Project:
+      type: object
+      required: [name]
+      properties:
+        name:        { type: string }
+        description: { type: string }
+        config:      { type: object, additionalProperties: { type: string } }
+
+    ClusterMember:
+      type: object
+      required: [name, url, status]
+      properties:
+        name:         { type: string }
+        url:          { type: string, format: uri }
+        status:       { type: string, enum: [Online, Offline, Evacuated] }
+        roles:
+          type: array
+          items: { type: string }
+        architecture: { type: string }
+        description:  { type: string }
+
+    Remote:
+      type: object
+      required: [name, url]
+      properties:
+        name:     { type: string }
+        url:      { type: string, format: uri }
+        protocol:
+          type: string
+          enum: [incus, lxd, simplestreams]
+          default: incus
+        auth_type:
+          type: string
+          enum: [tls, oidc]
+          default: tls
+        public:   { type: boolean, default: false }
+
+    Event:
+      type: object
+      required: [type, timestamp, metadata]
+      properties:
+        type:
+          type: string
+          enum: [lifecycle, logging, network, operation, ovn]
+        timestamp:  { type: string, format: date-time }
+        project:    { type: string }
+        location:   { type: string }
+        metadata:   { type: object, additionalProperties: true }
+
+    ComposeDeployment:
+      type: object
+      required: [name, compose]
+      properties:
+        name:        { type: string, description: "Container name" }
+        compose:     { type: string, description: "docker-compose.yaml content (YAML string)" }
+        project:     { type: string, default: "" }
+        ip:          { type: string, description: "Static IP or 'dhcp'" }
+        vlan:        { type: integer }
+        bridge_name: { type: string }
+        ssh_key:     { type: string }
+        disk_size:   { type: string, example: "20GB" }
+        image:       { type: string, default: "images:ubuntu/24.04" }
+
+  responses:
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Resource already exists or state conflict
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Accepted:
+      description: Operation accepted and running asynchronously
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Operation" }
+
+  parameters:
+    projectParam:
+      name: project
+      in: query
+      schema: { type: string, default: "" }
+      description: Project name filter
+    remoteParam:
+      name: remote
+      in: query
+      schema: { type: string, default: "" }
+      description: Remote server name
+
+# ── Paths ─────────────────────────────────────────────────────────────────────
+paths:
+
+  # ── Instances (containers + VMs) ──────────────────────────────────────────
+
+  /api/v1/instances:
+    get:
+      operationId: listInstances
+      summary: List instances
+      tags: [instances]
+      parameters:
+        - $ref: "#/components/parameters/projectParam"
+        - $ref: "#/components/parameters/remoteParam"
+        - name: type
+          in: query
+          schema:
+            $ref: "#/components/schemas/InstanceType"
+      responses:
+        "200":
+          description: Instance list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/InstanceSummary" }
+    post:
+      operationId: createInstance
+      summary: Create an instance
+      tags: [instances]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstanceConfig" }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/instances/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/projectParam"
+      - $ref: "#/components/parameters/remoteParam"
+    get:
+      operationId: getInstance
+      summary: Get instance details
+      tags: [instances]
+      responses:
+        "200":
+          description: Instance detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InstanceSummary" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteInstance
+      summary: Delete an instance
+      tags: [instances]
+      parameters:
+        - name: force
+          in: query
+          schema: { type: boolean, default: false }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/instances/{name}/state:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      operationId: changeInstanceState
+      summary: Start, stop, restart, freeze, or unfreeze an instance
+      tags: [instances]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstanceState" }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/instances/{name}/rename:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: renameInstance
+      summary: Rename an instance
+      tags: [instances]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InstanceRename" }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/instances/{name}/snapshots:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/projectParam"
+    get:
+      operationId: listSnapshots
+      summary: List snapshots for an instance
+      tags: [instances]
+      responses:
+        "200":
+          description: Snapshot list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:       { type: string }
+                    created_at: { type: string, format: date-time }
+                    stateful:   { type: boolean }
+    post:
+      operationId: createSnapshot
+      summary: Create a snapshot
+      tags: [instances]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:     { type: string }
+                stateful: { type: boolean, default: false }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /api/v1/instances/{name}/snapshots/{snapshot}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+      - name: snapshot
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/projectParam"
+    post:
+      operationId: restoreSnapshot
+      summary: Restore a snapshot
+      tags: [instances]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+    delete:
+      operationId: deleteSnapshot
+      summary: Delete a snapshot
+      tags: [instances]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /api/v1/instances/{name}/logs:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/projectParam"
+    get:
+      operationId: getInstanceLogs
+      summary: Get instance logs
+      tags: [instances]
+      responses:
+        "200":
+          description: Log content
+          content:
+            text/plain:
+              schema: { type: string }
+
+  /api/v1/instances/{name}/exec/ws:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/projectParam"
+    get:
+      operationId: execInstanceWs
+      summary: Open interactive terminal in instance (WebSocket upgrade)
+      tags: [instances]
+      parameters:
+        - name: command
+          in: query
+          schema: { type: string, default: "/bin/bash" }
+        - name: width
+          in: query
+          schema: { type: integer, default: 80 }
+        - name: height
+          in: query
+          schema: { type: integer, default: 24 }
+      responses:
+        "101":
+          description: WebSocket upgrade — PTY stream
+
+  /api/v1/instances/{name}/console/ws:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/projectParam"
+    get:
+      operationId: consoleInstanceWs
+      summary: Open VGA/serial console (WebSocket upgrade, VMs only)
+      tags: [instances]
+      responses:
+        "101":
+          description: WebSocket upgrade — console stream
+
+  /api/v1/instances/{name}/files:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/projectParam"
+      - name: path
+        in: query
+        required: true
+        schema: { type: string }
+    get:
+      operationId: pullFile
+      summary: Pull a file from an instance
+      tags: [instances]
+      responses:
+        "200":
+          description: File content
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+    post:
+      operationId: pushFile
+      summary: Push a file into an instance
+      tags: [instances]
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        "200":
+          description: File written
+
+  # ── Networks ───────────────────────────────────────────────────────────────
+
+  /api/v1/networks:
+    get:
+      operationId: listNetworks
+      summary: List networks
+      tags: [networks]
+      parameters:
+        - $ref: "#/components/parameters/projectParam"
+        - $ref: "#/components/parameters/remoteParam"
+      responses:
+        "200":
+          description: Network list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Network" }
+    post:
+      operationId: createNetwork
+      summary: Create a network
+      tags: [networks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Network" }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/networks/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/projectParam"
+    get:
+      operationId: getNetwork
+      summary: Get network details
+      tags: [networks]
+      responses:
+        "200":
+          description: Network detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Network" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: updateNetwork
+      summary: Update a network
+      tags: [networks]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Network" }
+      responses:
+        "200":
+          description: Updated
+    delete:
+      operationId: deleteNetwork
+      summary: Delete a network
+      tags: [networks]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ── Storage pools ──────────────────────────────────────────────────────────
+
+  /api/v1/storage-pools:
+    get:
+      operationId: listStoragePools
+      summary: List storage pools
+      tags: [storage]
+      parameters:
+        - $ref: "#/components/parameters/remoteParam"
+      responses:
+        "200":
+          description: Storage pool list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StoragePool" }
+    post:
+      operationId: createStoragePool
+      summary: Create a storage pool
+      tags: [storage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StoragePool" }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /api/v1/storage-pools/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getStoragePool
+      summary: Get storage pool details
+      tags: [storage]
+      responses:
+        "200":
+          description: Storage pool detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StoragePool" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: updateStoragePool
+      summary: Update a storage pool
+      tags: [storage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StoragePool" }
+      responses:
+        "200":
+          description: Updated
+    delete:
+      operationId: deleteStoragePool
+      summary: Delete a storage pool
+      tags: [storage]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/storage-pools/{pool}/volumes:
+    parameters:
+      - name: pool
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/projectParam"
+    get:
+      operationId: listStorageVolumes
+      summary: List volumes in a storage pool
+      tags: [storage]
+      responses:
+        "200":
+          description: Volume list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/StorageVolume" }
+    post:
+      operationId: createStorageVolume
+      summary: Create a storage volume
+      tags: [storage]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StorageVolume" }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /api/v1/storage-pools/{pool}/volumes/{name}:
+    parameters:
+      - name: pool
+        in: path
+        required: true
+        schema: { type: string }
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/projectParam"
+    delete:
+      operationId: deleteStorageVolume
+      summary: Delete a storage volume
+      tags: [storage]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ── Images ─────────────────────────────────────────────────────────────────
+
+  /api/v1/images:
+    get:
+      operationId: listImages
+      summary: List images
+      tags: [images]
+      parameters:
+        - $ref: "#/components/parameters/remoteParam"
+      responses:
+        "200":
+          description: Image list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Image" }
+    post:
+      operationId: pullImage
+      summary: Pull an image from a remote
+      tags: [images]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ImagePull" }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /api/v1/images/{fingerprint}:
+    parameters:
+      - name: fingerprint
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getImage
+      summary: Get image details
+      tags: [images]
+      responses:
+        "200":
+          description: Image detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Image" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: deleteImage
+      summary: Delete an image
+      tags: [images]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ── Profiles ───────────────────────────────────────────────────────────────
+
+  /api/v1/profiles:
+    get:
+      operationId: listProfiles
+      summary: List profiles
+      tags: [profiles]
+      parameters:
+        - $ref: "#/components/parameters/projectParam"
+        - $ref: "#/components/parameters/remoteParam"
+      responses:
+        "200":
+          description: Profile list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Profile" }
+    post:
+      operationId: createProfile
+      summary: Create a profile
+      tags: [profiles]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Profile" }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/profiles/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+      - $ref: "#/components/parameters/projectParam"
+    get:
+      operationId: getProfile
+      summary: Get profile details
+      tags: [profiles]
+      responses:
+        "200":
+          description: Profile detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Profile" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: updateProfile
+      summary: Update a profile
+      tags: [profiles]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Profile" }
+      responses:
+        "200":
+          description: Updated
+    delete:
+      operationId: deleteProfile
+      summary: Delete a profile
+      tags: [profiles]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/profiles/presets:
+    get:
+      operationId: listProfilePresets
+      summary: List bundled profile presets (GPU, audio, display, ROCm, nesting)
+      tags: [profiles]
+      responses:
+        "200":
+          description: Preset list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name:        { type: string }
+                    description: { type: string }
+                    category:
+                      type: string
+                      enum: [gpu, audio, display, rocm, nesting, network]
+                    profile:     { $ref: "#/components/schemas/Profile" }
+
+  # ── Projects ───────────────────────────────────────────────────────────────
+
+  /api/v1/projects:
+    get:
+      operationId: listProjects
+      summary: List projects
+      tags: [projects]
+      parameters:
+        - $ref: "#/components/parameters/remoteParam"
+      responses:
+        "200":
+          description: Project list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Project" }
+    post:
+      operationId: createProject
+      summary: Create a project
+      tags: [projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Project" }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/projects/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getProject
+      summary: Get project details
+      tags: [projects]
+      responses:
+        "200":
+          description: Project detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      operationId: updateProject
+      summary: Update a project
+      tags: [projects]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Project" }
+      responses:
+        "200":
+          description: Updated
+    delete:
+      operationId: deleteProject
+      summary: Delete a project
+      tags: [projects]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ── Cluster ────────────────────────────────────────────────────────────────
+
+  /api/v1/cluster/members:
+    get:
+      operationId: listClusterMembers
+      summary: List cluster members
+      tags: [cluster]
+      parameters:
+        - $ref: "#/components/parameters/remoteParam"
+      responses:
+        "200":
+          description: Cluster member list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/ClusterMember" }
+
+  /api/v1/cluster/members/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getClusterMember
+      summary: Get cluster member details
+      tags: [cluster]
+      responses:
+        "200":
+          description: Cluster member detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClusterMember" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: removeClusterMember
+      summary: Remove a cluster member
+      tags: [cluster]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /api/v1/cluster/members/{name}/evacuate:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: evacuateClusterMember
+      summary: Evacuate instances from a cluster member
+      tags: [cluster]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  /api/v1/cluster/members/{name}/restore:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      operationId: restoreClusterMember
+      summary: Restore an evacuated cluster member
+      tags: [cluster]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+
+  # ── Remotes ────────────────────────────────────────────────────────────────
+
+  /api/v1/remotes:
+    get:
+      operationId: listRemotes
+      summary: List configured remote servers
+      tags: [remotes]
+      responses:
+        "200":
+          description: Remote list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Remote" }
+    post:
+      operationId: addRemote
+      summary: Add a remote server
+      tags: [remotes]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Remote" }
+      responses:
+        "201":
+          description: Remote added
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/remotes/{name}:
+    parameters:
+      - name: name
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      operationId: getRemote
+      summary: Get remote details
+      tags: [remotes]
+      responses:
+        "200":
+          description: Remote detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Remote" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: removeRemote
+      summary: Remove a remote server
+      tags: [remotes]
+      responses:
+        "204":
+          description: Removed
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ── Operations ─────────────────────────────────────────────────────────────
+
+  /api/v1/operations:
+    get:
+      operationId: listOperations
+      summary: List operations
+      tags: [operations]
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, succeeded, failed, cancelled]
+      responses:
+        "200":
+          description: Operation list
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Operation" }
+
+  /api/v1/operations/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      operationId: getOperation
+      summary: Get operation details
+      tags: [operations]
+      responses:
+        "200":
+          description: Operation detail
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Operation" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      operationId: cancelOperation
+      summary: Cancel a running operation
+      tags: [operations]
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  # ── Events ─────────────────────────────────────────────────────────────────
+
+  /api/v1/events:
+    get:
+      operationId: streamEvents
+      summary: Stream real-time events (Server-Sent Events)
+      tags: [events]
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            description: Comma-separated event types to filter
+        - $ref: "#/components/parameters/projectParam"
+      responses:
+        "200":
+          description: SSE stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: "#/components/schemas/Event"
+
+  /api/v1/events/ws:
+    get:
+      operationId: streamEventsWs
+      summary: Stream real-time events (WebSocket)
+      tags: [events]
+      parameters:
+        - name: type
+          in: query
+          schema: { type: string }
+        - $ref: "#/components/parameters/projectParam"
+      responses:
+        "101":
+          description: WebSocket upgrade — event stream
+
+  # ── Provisioning ───────────────────────────────────────────────────────────
+
+  /api/v1/provisioning/compose:
+    post:
+      operationId: deployCompose
+      summary: Deploy an app container from a docker-compose file
+      tags: [provisioning]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposeDeployment" }
+      responses:
+        "202": { $ref: "#/components/responses/Accepted" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/provisioning/compose/convert:
+    post:
+      operationId: convertCompose
+      summary: Convert a docker-compose file to an incus-compose config
+      tags: [provisioning]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [compose]
+              properties:
+                compose: { type: string, description: "docker-compose.yaml content" }
+      responses:
+        "200":
+          description: Converted incus-compose config
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true

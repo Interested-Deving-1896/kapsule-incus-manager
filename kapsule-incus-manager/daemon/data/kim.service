@@ -1,0 +1,21 @@
+[Unit]
+Description=Kapsule-Incus-Manager daemon
+After=network.target
+Requires=kim.socket
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/kim-daemon
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+# Incus socket access
+SupplementaryGroups=incus-admin
+
+[Install]
+WantedBy=multi-user.target

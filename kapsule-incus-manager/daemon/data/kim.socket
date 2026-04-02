@@ -1,0 +1,12 @@
+[Unit]
+Description=Kapsule-Incus-Manager daemon socket
+
+[Socket]
+# HTTP REST + web UI
+ListenStream=127.0.0.1:8765
+# Unix socket for local D-Bus-less access
+ListenStream=%t/kim/kim.sock
+SocketMode=0660
+
+[Install]
+WantedBy=sockets.target

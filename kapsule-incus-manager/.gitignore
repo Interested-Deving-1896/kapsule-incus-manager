@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# Node / web UI
+node_modules/
+ui-web/dist/
+ui-web/.next/
+ui-web/build/
+
+# C++ / CMake
+ui-qml/build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.so
+*.a
+*.o
+*.moc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Generated
+api/schema/dbus/*.generated.xml
+cli/kim/cli/_generated.py
