@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from contextlib import contextmanager
+from typing import Any, Generator, Iterator
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -203,3 +204,96 @@ def test_http_error_exits_nonzero() -> None:
         result = runner.invoke(cli, ["container", "list"])
 
     assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# events streaming
+# ---------------------------------------------------------------------------
+
+def _make_sse_lines(payloads: list[dict[str, Any]]) -> list[str]:
+    """Build SSE-formatted lines from a list of JSON payloads."""
+    lines = []
+    for p in payloads:
+        lines.append(f"data: {json.dumps(p)}")
+        lines.append("")  # blank line between events
+    return lines
+
+
+@contextmanager
+def _mock_stream(lines: list[str]) -> Generator[MagicMock, None, None]:
+    """Context manager that patches httpx.Client so .stream() yields *lines*."""
+    mock_resp = MagicMock()
+    mock_resp.iter_lines.return_value = iter(lines)
+    mock_resp.__enter__ = lambda s: mock_resp
+    mock_resp.__exit__ = MagicMock(return_value=False)
+
+    with patch("kim.cli.client.httpx.Client") as MockClient:
+        mock_http = MagicMock()
+        mock_http.stream.return_value = mock_resp
+        MockClient.return_value = mock_http
+        yield mock_http
+
+
+def test_events_calls_sse_endpoint() -> None:
+    payloads = [{"type": "lifecycle", "metadata": {"action": "instance-started"}}]
+    with _mock_stream(_make_sse_lines(payloads)) as mock_http:
+        result = _runner().invoke(cli, ["events"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    mock_http.stream.assert_called_once()
+    path = mock_http.stream.call_args[0][1]
+    assert "/api/v1/events" in path
+
+
+def test_events_prints_each_payload() -> None:
+    payloads = [
+        {"type": "lifecycle", "metadata": {"action": "instance-started"}},
+        {"type": "lifecycle", "metadata": {"action": "instance-stopped"}},
+    ]
+    with _mock_stream(_make_sse_lines(payloads)):
+        result = _runner().invoke(cli, ["events"], catch_exceptions=False)
+
+    assert "instance-started" in result.output
+    assert "instance-stopped" in result.output
+
+
+def test_events_type_filter_passed_as_param() -> None:
+    with _mock_stream([]) as mock_http:
+        _runner().invoke(cli, ["events", "--type", "lifecycle"], catch_exceptions=False)
+
+    params = mock_http.stream.call_args[1].get("params", {})
+    assert params.get("type") == "lifecycle"
+
+
+def test_events_no_type_filter_sends_no_param() -> None:
+    with _mock_stream([]) as mock_http:
+        _runner().invoke(cli, ["events"], catch_exceptions=False)
+
+    params = mock_http.stream.call_args[1].get("params", {})
+    assert not params  # empty dict — no type filter
+
+
+def test_events_ignores_non_data_lines() -> None:
+    """Lines that don't start with 'data:' must be silently skipped."""
+    lines = [
+        ": keep-alive",
+        "event: lifecycle",
+        f"data: {json.dumps({'type': 'lifecycle'})}",
+        "",
+    ]
+    with _mock_stream(lines):
+        result = _runner().invoke(cli, ["events"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    # Only the data line should produce output
+    assert result.output.count("lifecycle") == 1
+
+
+def test_events_handles_invalid_json_gracefully() -> None:
+    """Malformed JSON in a data line must not crash the CLI."""
+    lines = ["data: {not valid json}", ""]
+    with _mock_stream(lines):
+        result = _runner().invoke(cli, ["events"], catch_exceptions=False)
+
+    assert result.exit_code == 0
+    assert "{not valid json}" in result.output
