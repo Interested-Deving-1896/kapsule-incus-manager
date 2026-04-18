@@ -9,10 +9,10 @@ previously maintained as separate projects:
 
 | Source project | Guest type | KIM integration |
 |---|---|---|
-| [incusbox](https://github.com/Interested-Deving-1896/incusbox) | Generic Linux containers | `kim provision generic` |
-| [waydroid-toolkit](https://github.com/Interested-Deving-1896/waydroid-toolkit) | Waydroid (Android) containers | `kim provision waydroid` |
-| [Incus-MacOS-Toolkit](https://github.com/Interested-Deving-1896/Incus-MacOS-Toolkit) | macOS KVM VMs | `kim provision macos` |
-| [incus-windows-toolkit](https://github.com/Interested-Deving-1896/incus-windows-toolkit) | Windows VMs | `kim provision windows` |
+| [incusbox](https://gitlab.com/OSPF1896/incusbox) | Generic Linux containers | `kim provision generic` |
+| [waydroid-toolkit](https://gitlab.com/OSPF1896/waydroid-toolkit) | Waydroid (Android) containers | `kim provision waydroid` |
+| [Incus-MacOS-Toolkit](https://gitlab.com/OSPF1896/Incus-MacOS-Toolkit) | macOS KVM VMs | `kim provision macos` |
+| [incus-windows-toolkit](https://gitlab.com/OSPF1896/incus-windows-toolkit) | Windows VMs | `kim provision windows` |
 
 All four toolkits are now daemon plugins — their logic runs inside `kim-daemon`
 and is exposed through the same REST/D-Bus API used by the GUI frontends.
