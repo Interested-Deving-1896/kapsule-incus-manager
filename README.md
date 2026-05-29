@@ -33,7 +33,13 @@ cd kapsule-incus-manager
 ## CI
 
 <!-- AI:start:ci -->
-_CI documentation pending._
+This repository includes the following per-repo workflows located in the `.github/workflows/` directory:
+
+- **pr-automation.yml**: Automates pull request labeling and management. No secrets required.
+- **rate-limit-status.yml**: Monitors API rate limits and logs usage. No secrets required.
+- **rate-limit-rerun.yml**: Re-runs workflows when rate limits are reset. No secrets required.
+
+Org-wide CI operations, including branch cleanup, dependency updates, and upstream syncs, are managed centrally by the [fork-sync-all](https://github.com/Interested-Deving-1896/fork-sync-all) control plane.
 <!-- AI:end:ci -->
 
 ## Mirror chain
@@ -53,7 +59,9 @@ Direct commits to OSP or OOC are detected and opened as PRs back to `Interested-
 ## Contributors
 
 <!-- AI:start:contributors -->
-_Contributors pending._
+[@Interested-Deving-1896](https://github.com/Interested-Deving-1896): 75 commits
+
+Note: This repository is a mirror. Please refer to the upstream source for additional contributions and updates.
 <!-- AI:end:contributors -->
 
 ## Origins
