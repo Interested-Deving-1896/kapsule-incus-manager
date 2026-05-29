@@ -77,4 +77,4 @@ jobs:
             echo "SYNC_TOKEN not configured — skipping."
             exit 0
           fi
-          bash scripts/mirror-artifacts.sh
+          bash ./scripts/mirror-artifacts.sh
