@@ -4,7 +4,7 @@
 [![Built with Ona](https://ona.com/build-with-ona.svg)](https://app.ona.com/#https://github.com/Interested-Deving-1896/kapsule-incus-manager)
 
 <!-- AI:start:what-it-does -->
-This project provides a unified management solution for Incus containers and virtual machines through a Qt6/QML desktop UI, a web UI, and a CLI, ensuring full feature parity across interfaces. It is designed for developers and system administrators who require consistent and streamlined tools to manage Incus environments.
+This project provides a unified management solution for Incus containers and virtual machines through a Qt6/QML desktop application, a web-based interface, and a command-line tool. It ensures feature parity across all interfaces, enabling developers and system administrators to efficiently manage Incus resources in diverse environments.
 <!-- AI:end:what-it-does -->
 
 ## Architecture
