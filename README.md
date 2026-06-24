@@ -73,7 +73,9 @@ _Original project — no upstream fork._
 ## Resources
 
 <!-- AI:start:resources -->
-_No additional resource files found._
+| File | Description |
+|---|---|
+| [dep-graph/origins.md](https://github.com/Interested-Deving-1896/kapsule-incus-manager/blob/main/dep-graph/origins.md) | Dependency graph (Markdown table) |
 <!-- AI:end:resources -->
 
 ## License
