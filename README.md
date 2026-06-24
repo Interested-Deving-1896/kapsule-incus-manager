@@ -67,20 +67,13 @@ Note: This repository is a mirror. Please refer to the upstream source for addit
 ## Origins
 
 <!-- AI:start:origins -->
-
-Original project — unified Incus container and VM management with Qt6/QML desktop UI, web UI, and CLI.
-
-| Origin | Host | Fork in I-D-1896 |
-|--------|------|-----------------|
-| [lxc/incus](https://github.com/lxc/incus) | GitHub | ✅ |
+_Original project — no upstream fork._
 <!-- AI:end:origins -->
 
 ## Resources
 
 <!-- AI:start:resources -->
-| File | Description |
-|---|---|
-| [dep-graph/origins.md](https://github.com/Interested-Deving-1896/kapsule-incus-manager/blob/main/dep-graph/origins.md) | Dependency graph (Markdown table) |
+_No additional resource files found._
 <!-- AI:end:resources -->
 
 ## License
