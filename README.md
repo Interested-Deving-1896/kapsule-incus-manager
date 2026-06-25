@@ -78,9 +78,7 @@ Original project — unified Incus container and VM management with Qt6/QML desk
 ## Resources
 
 <!-- AI:start:resources -->
-| File | Description |
-|---|---|
-| [dep-graph/origins.md](https://github.com/Interested-Deving-1896/kapsule-incus-manager/blob/main/dep-graph/origins.md) | Dependency graph (Markdown table) |
+_No additional resource files found._
 <!-- AI:end:resources -->
 
 ## License
