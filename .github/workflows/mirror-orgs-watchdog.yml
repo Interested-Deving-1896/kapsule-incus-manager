@@ -53,7 +53,8 @@ jobs:
           echo "Retrying ${TARGET}..."
           gh workflow run "$TARGET" \
             --repo ${{ github.repository }} \
-            --ref main
+            --ref main \
+            --token $GH_TOKEN
           echo "Retry triggered."
 
       - name: Write summary
@@ -61,4 +62,5 @@ jobs:
         env:
           JOB_STATUS: ${{ job.status }}
           INPUTS_JSON: ${{ toJSON(inputs) }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}  # Ensure GH_TOKEN is available here as well
         run: bash ./scripts/write-summary.sh
